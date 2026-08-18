@@ -1,0 +1,6 @@
+# nothing machine-specific belongs here
+*.pass
+backups/
+*.img
+*.img.gz
+esp-*

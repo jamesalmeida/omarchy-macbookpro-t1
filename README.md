@@ -246,7 +246,10 @@ Two traps:
 **`no clm_blob available (err=-2)` is a red herring.** For `linux-firmware` builds the
 regulatory data is compiled into `brcmfmac43602-pcie.bin`; there is no separate blob. The
 message appears on perfectly healthy systems. Do not fabricate that file — an injected
-generic blob has been reported to crash the chip.
+generic blob has been reported to crash the chip. For the same reason `country 99: DFS-UNSET`
+on the phy is normal, as is a global domain that never reaches it — 5 GHz runs at full rate in
+exactly that state. On current Arch, `/etc/conf.d/wireless-regdom` is vestigial: `crda` is gone
+and no service reads that file.
 
 **The driver cannot be reloaded live.** NetworkManager holds it, so `modprobe -r brcmfmac`
 returns "Module brcmfmac is in use" and the NVRAM is never re-read. **Only a fresh boot picks
@@ -254,6 +257,46 @@ it up.** Since Wi-Fi may be your only route in, arm a failsafe before rebooting:
 oneshot that waits ~100 s, checks `nmcli -t -f STATE general`, and deletes the NVRAM if the
 network did not come up. **Disable it once confirmed**, or a future boot with a slow
 NetworkManager will false-positive and delete a working file.
+
+### The NVRAM enables the band, it does not choose it
+
+This is the step that makes a correct install look like a failed one.
+
+If your router presents 2.4 GHz and 5 GHz as **separate SSIDs** and you have connected to
+both at some point, NetworkManager holds two profiles that both default to
+`autoconnect-priority` 0. With the priorities tied it falls through to the last-connected
+timestamp — and that is self-reinforcing. Every boot picks 2.4 GHz, connecting refreshes
+that profile's timestamp, so 2.4 GHz wins again more strongly next time. **Each reboot
+makes it worse, not better.**
+
+The symptom is indistinguishable from "the NVRAM did not persist": you reboot, you are on
+2.4 GHz, and the obvious conclusion is the wrong one.
+
+Priority is evaluated before the timestamp, so one number settles it permanently:
+
+```bash
+# both profiles at 0? that is the bug
+nmcli -f NAME,TYPE,AUTOCONNECT-PRIORITY connection show
+
+nmcli connection modify "<YOUR_SSID>_5G" connection.autoconnect-priority 10
+```
+
+Leave the 2.4 GHz profile at 0 with autoconnect on. It becomes a fallback rather than a
+competitor, and it reaches further than 5 GHz does.
+
+**Do not pin the band or the BSSID to force the issue:**
+
+```bash
+# do NOT do this
+nmcli connection modify "<YOUR_SSID>_5G" 802-11-wireless.band a
+nmcli connection modify "<YOUR_SSID>_5G" 802-11-wireless.bssid AA:BB:CC:DD:EE:FF
+```
+
+Pinning either one removes NetworkManager's ability to fall back. A boot where 5 GHz does
+not answer then hangs in `connecting (configuring)` instead of coming up on 2.4 GHz. If
+Wi-Fi is your only route into the machine, that turns a working fallback into a lockout.
+
+Measured after the fix: 5220 MHz, -43 dBm, 300 Mbit/s, chosen automatically on boot.
 
 `boardflags3=0x00000300` was sufficient here. Several guides insist `0xC0000303` is required
 for dual band; it was not. If 5 GHz does not appear, that is the next single variable.
@@ -448,6 +491,7 @@ from sysfs, so it works without `usbutils`.
 | "No 5 GHz on BCM43602, unfixable" | Fixable, and it also recovers ~26 dB of signal |
 | "Audio does not work on `MacBookPro14,2`" | It does |
 | "Extract Wi-Fi firmware from macOS per the t2linux guide" | Not applicable. BCM43602 firmware ships in `linux-firmware`; only the NVRAM is missing |
+| "5 GHz worked once, then stopped surviving reboots" | Not the firmware. NetworkManager's priority tie-break silently prefers 2.4 GHz; set `autoconnect-priority` on the 5 GHz profile |
 | "Install `broadcom-wl`" | Do not. Wrong driver for this chip, and Omarchy's own installer excludes 43602 from it |
 | "`tiny-dfr` / `hid-appletb-kbd` for the Touch Bar" | T2-only. They do nothing on a T1 |
 

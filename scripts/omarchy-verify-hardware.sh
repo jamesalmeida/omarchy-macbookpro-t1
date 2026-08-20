@@ -133,6 +133,16 @@ else
   if [[ -n ${IFACE:-} ]]; then
     ok "interface $IFACE present"
     echo "        (5 GHz check needs root: sudo iw dev $IFACE scan | grep -c 'freq: 5')"
+
+    # band selection: tied autoconnect priorities silently favour 2.4 GHz on boot
+    if have nmcli; then
+      if nmcli -t -f TYPE,AUTOCONNECT-PRIORITY connection show 2>/dev/null \
+           | awk -F: '$1 == "802-11-wireless" && $2 != "0"' | grep -q .; then
+        ok "a wifi profile carries a non-zero autoconnect-priority"
+      else
+        warn "all wifi profiles at autoconnect-priority 0 -- NetworkManager breaks the tie on last-connected, which favours 2.4 GHz"
+      fi
+    fi
   else
     warn "no wireless interface found"
   fi

@@ -479,41 +479,114 @@ not an unbootable machine.
 
 ---
 
-## Part 7 — No Touch Bar means no keys, and that has a config answer
+## Part 7 — Missing Esc and F-keys, without the Touch Bar
 
-Worth stating plainly, because it is the lesson that took longest to learn: **on a Touch Bar
-Mac, Esc and F1–F12 are virtual keys that only exist when the Touch Bar driver works.** Seven
-things break as a result, and every one has a config-level fix needing no driver at all:
+If Part 6 already lit the strip, skip this. Esc and F1–F12 exist on the Touch Bar,
+and Omarchy's volume/brightness bindings (`XF86*`) work.
 
-| Lost | Fix |
-| --- | --- |
-| **Escape** | Map Caps Lock. In Omarchy 4.x, `~/.config/hypr/input.lua`:<br>`hl.config({ input = { kb_options = "caps:escape" } })` |
-| Volume, brightness, keyboard light, mute, mic mute | Omarchy binds these to `XF86*` keycodes the Touch Bar emits. Rebind to `SUPER+CTRL+arrows`, which Omarchy leaves free apart from LEFT/RIGHT |
-| Dictation push-to-talk (`F9`) | Use the toggle, `SUPER + CTRL + X` |
-| `Ctrl+Alt+F2` for a TTY | Unavailable. Keep a USB keyboard for recovery |
+If the strip is still dark, those keys **do not exist on the keyboard**. Caps Lock
+is the only nearby key you can turn into Escape. Volume, brightness, mute and
+keyboard light have no hardware keys at all until you bind them to something else.
 
-Omarchy 4.x configures Hyprland in **Lua**, not `.conf`, and ships `input.lua` as an
-all-commented template.
+Omarchy 4.x / Quattro uses Lua. The user file is `~/.config/hypr/input.lua` (also
+reachable via Super+Space → Setup → Input). It ships as an all-commented template.
+Omarchy's default already sets `kb_options = "compose:caps,..."` — Caps Lock is
+the compose key — so you **replace** that option, you do not add a second line.
 
-If your goal is simply "I need an Escape key", stop here — that is three lines and thirty
-seconds. The Touch Bar is a separate, optional project.
+**Escape from Caps Lock:**
+
+```lua
+-- ~/.config/hypr/input.lua
+hl.config({
+  input = {
+    kb_options = "caps:escape",
+  },
+})
+```
+
+Then `hyprctl reload`. Tap Caps Lock; it should send Escape (exit insert mode in
+vim, close menus). You lose Caps Lock itself and Omarchy's compose-on-Caps
+shortcut. Move compose to Right Alt if you still want it:
+
+```lua
+hl.config({
+  input = {
+    kb_options = "caps:escape,compose:ralt",
+  },
+})
+```
+
+**Volume and brightness without F-keys.** Omarchy binds those to `XF86*` keycodes
+the Touch Bar emits. With a dark strip they never fire. Add fallbacks in
+`~/.config/hypr/bindings.lua`. Super+Ctrl+Up/Down/Left are free; Super+Ctrl+L
+is already Lock, so do not use Left for anything you will hit by accident.
+
+```lua
+-- ~/.config/hypr/bindings.lua
+o.bind("SUPER + CTRL + UP",    "Volume up",   "omarchy-swayosd-client --output-volume raise", { repeating = true })
+o.bind("SUPER + CTRL + DOWN",  "Volume down", "omarchy-swayosd-client --output-volume lower", { repeating = true })
+o.bind("SUPER + CTRL + RIGHT", "Brightness up",   "omarchy-brightness-display +5%", { repeating = true })
+o.bind("SUPER + SHIFT + DOWN", "Brightness down", "omarchy-brightness-display 5%-", { repeating = true })
+```
+
+`hyprctl reload` again. Dictation, if you use it, is already `SUPER + CTRL + X`
+and does not need F9.
+
+**A TTY (`Ctrl+Alt+F2`) is unavailable** on a Touch Bar machine with a dark
+strip. Keep a USB keyboard for recovery.
 
 ---
 
-## Part 8 — Suspend, fans, USB-C
+## Part 8 — Suspend, USB-C, fans
 
-**Suspend works.** Omarchy's `d3cold_allowed=0` fix is applied automatically. Two things that
-read as failure:
+### Suspend
 
-- Resume takes ~15 s **and needs a keypress** — opening the lid alone does not finish the
-  wake. Wait a full minute before concluding it is hung.
-- Two Thunderbolt xHCI controllers fail to reset (`Host halt failed, -19`), leaving USB-C dead
-  until reboot. Fixed with `pcie_ports=compat` — afterwards all three controllers bind.
+Omarchy already applies the NVMe fix (`d3cold_allowed=0`). You do not install
+anything else.
 
-**Fans need nothing.** `applesmc` loads itself and reports both fans plus ~40 SMC sensors.
-`fan*_manual = 0` means the SMC controls them in firmware: observed 2101 → 3660 RPM under
-load with temperature falling 68 → 61 °C. Guides recommending `mbpfan` for these machines are
-wrong — it only lets you reshape a curve that already works.
+Suspend from the session: **Super+Escape** → Suspend. Closing the lid also works
+once logind is set to suspend on lid close.
+
+Resume looks hung if you only open the lid. Wait ~15 seconds **and press a
+key**. Opening the lid alone does not finish the wake. Give it a full minute
+before a forced power-off.
+
+### USB-C after resume
+
+Without `pcie_ports=compat`, two Thunderbolt xHCI controllers fail to reset
+(`Host halt failed, -19`) and USB-C stays dead until reboot. That parameter
+belongs in a limine **drop-in**, not in `/boot/limine.conf` — that file is
+regenerated. If you skipped it in Part 2:
+
+```bash
+sudo tee /etc/limine-entry-tool.d/macbook-t1.conf <<'EOF'
+KERNEL_CMDLINE[default]+=" pcie_ports=compat"
+EOF
+sudo limine-update
+sudo reboot
+```
+
+Confirm it is on the running kernel, then that three xHCI controllers bound:
+
+```bash
+cat /proc/cmdline | tr ' ' '\n' | grep pcie_ports
+dmesg | grep -i xhci
+```
+
+Plug something into USB-C after a resume. If it enumerates, the parameter took.
+
+### Fans
+
+Do **not** install `mbpfan`. `applesmc` loads itself and the SMC already runs
+both fans in firmware (`fan*_manual = 0`). On this machine they moved 2101 →
+3660 RPM under load while temperature fell 68 → 61 °C. `mbpfan` only lets you
+reshape a curve that already works.
+
+```bash
+lsmod | grep applesmc
+# optional, if lm_sensors is installed:
+sensors
+```
 
 ---
 

@@ -403,26 +403,68 @@ printf '%s' "$DEV" | sudo tee /sys/bus/hid/drivers/apple-ibridge-hid/bind >/dev/
 
 ### Install
 
+`drivers/appleibridge/` is **patched kernel source**, not a script you run. Do this
+from inside Omarchy. The bugs above are already fixed in those files; the service
+is what actually lights the strip.
+
+**0. Confirm the T1 is alive.** You want `05ac:8600`. If you see `1281`, stop —
+firmware is gone and no driver will help.
+
 ```bash
-sudo pacman -S --needed linux-headers dkms
+for d in /sys/bus/usb/devices/*/; do
+  [ "$(cat "$d/idVendor" 2>/dev/null)" = "05ac" ] &&
+    echo "05ac:$(cat "$d/idProduct" 2>/dev/null) $(cat "$d/product" 2>/dev/null)"
+done
+```
+
+Remove Omarchy's broken SPI DKMS package if it is present. It collides with this
+driver:
+
+```bash
+sudo dkms remove -m macbook12-spi-driver -v 0+git.315 --all
+sudo pacman -R macbook12-spi-driver-dkms
+modinfo -n applespi   # confirm mainline still provides it
+```
+
+**1. Get this repo onto the machine.**
+
+```bash
+sudo pacman -S --needed git base-devel linux-headers dkms zstd
+git clone https://github.com/nohzafk/omarchy-macbookpro-t1.git
+cd omarchy-macbookpro-t1
+```
+
+A USB copy of the tree works the same way. The `sudo cp` below is relative to the
+repo root.
+
+**2. Build the modules with DKMS.**
+
+```bash
 sudo mkdir -p /usr/src/appleibridge-0.1
 sudo cp drivers/appleibridge/{*.c,*.h,Makefile,dkms.conf} /usr/src/appleibridge-0.1/
 sudo dkms add -m appleibridge -v 0.1
 sudo dkms build -m appleibridge -v 0.1
 sudo dkms install -m appleibridge -v 0.1
-
-sudo install -m 755 systemd/touchbar-enable.sh /usr/local/sbin/
-sudo install -m 644 systemd/touchbar.service   /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now touchbar.service
-journalctl -u touchbar.service -n 20
 ```
 
-Expect `SUCCESS: fnmode=0 idle=-1 dim=-1`.
+**3. Install the service that takes interface `.0002` back.** Building is not
+enough. At boot `hid-sensor-hub` steals the Touch Bar reports; the modules load,
+`dmesg` looks fine, and the strip stays dark. The service fixes that.
 
-The service runs **after `multi-user.target`** on purpose. Loading these modules from
-`/etc/modules-load.d/` hangs `sysinit.target` when anything wedges, and the only recovery is a
-forced power-off — that cost three power-offs while working this out. Late means a failure
-costs a dark strip and nothing else. The strip appears a few seconds after login.
+```bash
+sudo install -m 755 systemd/touchbar-enable.sh /usr/local/sbin/touchbar-enable.sh
+sudo install -m 644 systemd/touchbar.service   /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now touchbar.service
+journalctl -u touchbar.service -n 20 --no-pager
+```
+
+Expect `SUCCESS: fnmode=0 idle=-1 dim=-1` and both interfaces owned by
+`apple-ibridge-hid`. The strip appears a few seconds after login, Esc + F1–F12.
+
+Do **not** put these modules in `/etc/modules-load.d/`. If they wedge at boot they
+hang `sysinit.target` and the only recovery is a forced power-off. The service
+runs after `multi-user.target` on purpose: a failure then costs a dark strip,
+not an unbootable machine.
 
 ### Things that look like failure but are not
 

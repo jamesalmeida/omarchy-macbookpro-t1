@@ -156,8 +156,11 @@ nvme0n1p4  129G   crypto_LUKS   <- Omarchy root
 
 It boots as the firmware default, but holding Option shows only "Macintosh HD". Apple's
 picker lists a generic "EFI Boot" entry only when it finds `\EFI\BOOT\BOOTX64.EFI`, and
-Omarchy never creates it — it registers an NVRAM variable instead. Fix it permanently, from
-Omarchy:
+Omarchy never creates it — it registers an NVRAM variable instead.
+
+**Do not hold Option on the first reboot.** A normal power-on follows that NVRAM variable
+and lands in Omarchy. Holding Option is what hides it, which makes the next step look
+impossible. Once you are in, fix the picker permanently:
 
 ```bash
 sudo mkdir -p /boot/EFI/BOOT
